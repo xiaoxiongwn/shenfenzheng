@@ -1,0 +1,55 @@
+name: Build ID Card A4 APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. 配置 Flutter 环境
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0'
+
+      # 3. 创建 Flutter 项目底层结构
+      - name: Create Flutter Project Structure
+        run: flutter create --org com.idcard.a4 --project-name id_card_a4 .
+
+      # 4. 安装代码所需的依赖包
+      - name: Install Dependencies
+        run: |
+          flutter pub add image_picker
+          flutter pub add image
+          flutter pub add path_provider
+          flutter pub add share_plus
+
+      # 5. 注入相机和读取权限
+      - name: Add Android Permissions
+        run: |
+          sed -i 's/<\/manifest>/<uses-permission android:name="android.permission.CAMERA"\/>\n<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"\/>\n<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>\n<\/manifest>/' android/app/src/main/AndroidManifest.xml
+
+      # 6. 修改最低支持版本为 21
+      - name: Configure Android minSdkVersion
+        run: |
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle
+
+      # 7. 编译生成 APK 文件
+      - name: Build APK
+        run: flutter build apk --release
+
+      # 8. 将打包好的 APK 上传供下载
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ID-Card-A4-APK
+          path: build/app/outputs/flutter-apk/app-release.apk

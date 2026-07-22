@@ -25,14 +25,14 @@ jobs:
       - name: Create Flutter Project Structure
         run: flutter create --org com.idcard.a4 --project-name id_card_a4 .
 
-      # 4. 安装代码所需的依赖包
+      # 4. 安装代码所需的依赖包 (锁定版本，避免强制要求高版本SDK)
       - name: Install Dependencies
         run: |
           flutter pub add image_picker
-          flutter pub add image_cropper
+          flutter pub add image_cropper:7.1.0
           flutter pub add image
           flutter pub add path_provider
-          flutter pub add share_plus
+          flutter pub add share_plus:9.0.0
 
       # 5. 注入相机、读取权限及裁剪库所需的 Activity 配置
       - name: Add Android Permissions and UCrop Activity
@@ -40,9 +40,10 @@ jobs:
           sed -i 's/<\/manifest>/<uses-permission android:name="android.permission.CAMERA"\/>\n<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"\/>\n<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>\n<\/manifest>/' android/app/src/main/AndroidManifest.xml
           sed -i 's/<\/activity>/<\/activity>\n<activity android:name="com.yalantis.ucrop.UCropActivity" android:screenOrientation="portrait" android:theme="@style\/Theme.AppCompat.Light.NoActionBar"\/>/' android/app/src/main/AndroidManifest.xml
 
-      # 6. 修改最低支持版本为 21
-      - name: Configure Android minSdkVersion
+      # 6. 强制指定 SDK 版本为 34 (兼容性最好)
+      - name: Configure Android SDK Versions
         run: |
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' android/app/build.gradle
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle
 
       # 7. 编译生成 APK 文件

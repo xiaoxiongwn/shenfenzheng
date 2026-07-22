@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -33,19 +34,45 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   File? _frontImage;
   File? _backImage;
-  bool _isVertical = true; // 默认竖向排列
+  bool _isVertical = true;
   bool _isProcessing = false;
+  
+  // 间距滑动条变量，默认 300px (约 25.4mm)
+  double _gapPixels = 300.0; 
 
   final ImagePicker _picker = ImagePicker();
 
-  Future<void> _pickImage(bool isFront, ImageSource source) async {
+  // 选图并裁剪逻辑
+  Future<void> _pickAndCropImage(bool isFront, ImageSource source) async {
     final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 100);
-    if (pickedFile != null) {
+    if (pickedFile == null) return;
+
+    // 调起专业裁剪界面，锁定身份证比例 85.6 : 54.0
+    final croppedFile = await ImageCropper().cropImage(
+      sourcePath: pickedFile.path,
+      aspectRatio: const CropAspectRatio(ratioX: 85.6, ratioY: 54.0),
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: '裁剪身份证边缘',
+          toolbarColor: Colors.blue,
+          toolbarWidgetColor: Colors.white,
+          lockAspectRatio: true, // 锁定比例防变形
+          hideBottomControls: false,
+        ),
+        IOSUiSettings(
+          title: '裁剪身份证边缘',
+          aspectRatioLockEnabled: true,
+          resetAspectRatioEnabled: false,
+        ),
+      ],
+    );
+
+    if (croppedFile != null) {
       setState(() {
         if (isFront) {
-          _frontImage = File(pickedFile.path);
+          _frontImage = File(croppedFile.path);
         } else {
-          _backImage = File(pickedFile.path);
+          _backImage = File(croppedFile.path);
         }
       });
     }
@@ -59,65 +86,57 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    setState(() {
-      _isProcessing = true;
-    });
+    setState(() { _isProcessing = true; });
 
     try {
-      // 1. 读取并解码图片
       final frontBytes = await _frontImage!.readAsBytes();
       final backBytes = await _backImage!.readAsBytes();
       final frontImg = img.decodeImage(frontBytes)!;
       final backImg = img.decodeImage(backBytes)!;
 
-      // 2. 调整为身份证真实大小 (300 DPI 打印标准)
-      // 身份证尺寸：长 85.6mm (1011px), 宽 54.0mm (638px)
+      // 强制缩放为标准身份证尺寸 (300 DPI)
       final resizedFront = img.copyResize(frontImg, width: 1011, height: 638);
       final resizedBack = img.copyResize(backImg, width: 1011, height: 638);
 
-      // 3. 创建 A4 纸画布 (300 DPI: 210mm x 297mm -> 2480px x 3508px)
+      // 创建 A4 画布 2480 x 3508
       final canvas = img.Image(width: 2480, height: 3508);
-      img.fill(canvas, color: img.ColorRgb8(255, 255, 255)); // 白色背景
+      img.fill(canvas, color: img.ColorRgb8(255, 255, 255));
 
-      // 4. 根据选择的方式进行排版
+      int gap = _gapPixels.toInt();
+
       if (_isVertical) {
-        // 竖向排列：居中，正面在上，反面在下
+        // 竖向排列：水平居中，垂直根据间距居中计算
+        int totalH = 638 * 2 + gap;
+        int y1 = (3508 - totalH) ~/ 2;
+        int y2 = y1 + 638 + gap;
         int x = (2480 - 1011) ~/ 2;
-        int y1 = 400; // 距离顶部约 3.3cm
-        int y2 = y1 + 638 + 300; // 间距约 2.5cm
         img.compositeImage(canvas, resizedFront, dstX: x, dstY: y1);
         img.compositeImage(canvas, resizedBack, dstX: x, dstY: y2);
       } else {
-        // 横向排列：居中，正面在左，反面在右
+        // 横向排列：垂直居中，水平根据间距居中计算
+        int totalW = 1011 * 2 + gap;
+        int x1 = (2480 - totalW) ~/ 2;
+        int x2 = x1 + 1011 + gap;
         int y = (3508 - 638) ~/ 2;
-        int x1 = 400; // 距离左侧约 3.3cm
-        int x2 = x1 + 1011 + 300; // 间距约 2.5cm
         img.compositeImage(canvas, resizedFront, dstX: x1, dstY: y);
         img.compositeImage(canvas, resizedBack, dstX: x2, dstY: y);
       }
 
-      // 5. 将画布编码为 PNG 图片
       final pngBytes = img.encodePng(canvas);
-
-      // 6. 保存到手机临时目录
       final tempDir = await getTemporaryDirectory();
       final file = File('${tempDir.path}/id_card_a4_${DateTime.now().millisecondsSinceEpoch}.png');
       await file.writeAsBytes(pngBytes);
 
-      // 7. 调用系统分享（可直接发给打印机或保存到相册）
       await Share.shareXFiles([XFile(file.path)], text: '身份证A4排版已生成，请打印');
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('生成失败: $e')),
       );
     } finally {
-      setState(() {
-        _isProcessing = false;
-      });
+      setState(() { _isProcessing = false; });
     }
   }
 
-  // 构建图片选择UI
   Widget _buildImageSelector(String title, File? imageFile, bool isFront) {
     return Card(
       elevation: 2,
@@ -142,12 +161,12 @@ class _HomePageState extends State<HomePage> {
                 ElevatedButton.icon(
                   icon: const Icon(Icons.photo),
                   label: const Text('相册'),
-                  onPressed: () => _pickImage(isFront, ImageSource.gallery),
+                  onPressed: () => _pickAndCropImage(isFront, ImageSource.gallery),
                 ),
                 ElevatedButton.icon(
                   icon: const Icon(Icons.camera_alt),
                   label: const Text('拍照'),
-                  onPressed: () => _pickImage(isFront, ImageSource.camera),
+                  onPressed: () => _pickAndCropImage(isFront, ImageSource.camera),
                 ),
               ],
             )
@@ -159,21 +178,20 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    // 将像素间距转换为毫米显示 (300 DPI: 1 inch = 25.4mm = 300px)
+    double gapMm = _gapPixels / 300 * 25.4;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('身份证A4排版打印'),
-      ),
+      appBar: AppBar(title: const Text('身份证A4排版打印')),
       body: _isProcessing
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 20),
-                  Text('正在生成高清A4图片...', style: TextStyle(fontSize: 16)),
-                ],
-              ),
-            )
+          ? const Center(child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 20),
+                Text('正在生成高清A4图片...', style: TextStyle(fontSize: 16)),
+              ],
+            ))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -204,7 +222,17 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 10),
+                  Text('正反面间距：${gapMm.toStringAsFixed(1)} mm', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Slider(
+                    value: _gapPixels,
+                    min: 0,
+                    max: 800, // 最大约 67mm 间距
+                    divisions: 80,
+                    label: gapMm.toStringAsFixed(1),
+                    onChanged: (value) => setState(() => _gapPixels = value),
+                  ),
+                  const SizedBox(height: 20),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
@@ -216,7 +244,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    '说明：生成的图片为300DPI高清分辨率，尺寸已自动缩放为身份证原件大小(85.6mm × 54.0mm)。生成后可直接发送给连接打印机的应用进行打印。',
+                    '说明：选图或拍照后会弹出裁剪框，请拖动边缘框选身份证有效区域以去除背景。生成图片为300DPI原件大小，打印时请选择“实际大小”。',
                     style: TextStyle(color: Colors.grey, fontSize: 12),
                     textAlign: TextAlign.center,
                   )

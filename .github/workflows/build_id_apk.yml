@@ -29,14 +29,16 @@ jobs:
       - name: Install Dependencies
         run: |
           flutter pub add image_picker
+          flutter pub add image_cropper
           flutter pub add image
           flutter pub add path_provider
           flutter pub add share_plus
 
-      # 5. 注入相机和读取权限
-      - name: Add Android Permissions
+      # 5. 注入相机、读取权限及裁剪库所需的 Activity 配置
+      - name: Add Android Permissions and UCrop Activity
         run: |
           sed -i 's/<\/manifest>/<uses-permission android:name="android.permission.CAMERA"\/>\n<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"\/>\n<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"\/>\n<\/manifest>/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<\/activity>/<\/activity>\n<activity android:name="com.yalantis.ucrop.UCropActivity" android:screenOrientation="portrait" android:theme="@style\/Theme.AppCompat.Light.NoActionBar"\/>/' android/app/src/main/AndroidManifest.xml
 
       # 6. 修改最低支持版本为 21
       - name: Configure Android minSdkVersion

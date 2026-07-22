@@ -25,6 +25,10 @@ jobs:
       - name: Create Flutter Project Structure
         run: flutter create --org com.idcard.a4 --project-name id_card_a4 .
 
+      # 3.5 修改 APP 显示名称 (新增这一步)
+      - name: Change App Name
+        run: sed -i 's/android:label="[^"]*"/android:label="身份证排版打印"/' android/app/src/main/AndroidManifest.xml
+
       # 4. 安装代码所需的依赖包 (锁定版本，避免强制要求高版本SDK)
       - name: Install Dependencies
         run: |

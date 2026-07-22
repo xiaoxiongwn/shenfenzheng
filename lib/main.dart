@@ -37,32 +37,29 @@ class _HomePageState extends State<HomePage> {
   bool _isVertical = true;
   bool _isProcessing = false;
   
-  // 间距滑动条变量，默认 300px (约 25.4mm)
   double _gapPixels = 300.0; 
 
   final ImagePicker _picker = ImagePicker();
 
-  // 选图并裁剪逻辑
   Future<void> _pickAndCropImage(bool isFront, ImageSource source) async {
     final XFile? pickedFile = await _picker.pickImage(source: source, imageQuality: 100);
     if (pickedFile == null) return;
 
-    // 调起专业裁剪界面，锁定身份证比例 85.6 : 54.0
+    // 调起裁剪界面，解除比例锁定，支持自由长宽缩放
     final croppedFile = await ImageCropper().cropImage(
       sourcePath: pickedFile.path,
-      aspectRatio: const CropAspectRatio(ratioX: 85.6, ratioY: 54.0),
       uiSettings: [
         AndroidUiSettings(
-          toolbarTitle: '裁剪身份证边缘',
+          toolbarTitle: '自由裁剪身份证',
           toolbarColor: Colors.blue,
           toolbarWidgetColor: Colors.white,
-          lockAspectRatio: true, // 锁定比例防变形
+          lockAspectRatio: false, // 允许自由调整长宽
           hideBottomControls: false,
         ),
         IOSUiSettings(
-          title: '裁剪身份证边缘',
-          aspectRatioLockEnabled: true,
-          resetAspectRatioEnabled: false,
+          title: '自由裁剪身份证',
+          aspectRatioLockEnabled: false, // 允许自由调整长宽
+          resetAspectRatioEnabled: true,
         ),
       ],
     );
@@ -76,6 +73,31 @@ class _HomePageState extends State<HomePage> {
         }
       });
     }
+  }
+
+  // 给图片添加透明圆角
+  img.Image applyRoundedCorners(img.Image src, int radius) {
+    img.Image dst = img.Image(width: src.width, height: src.height, numChannels: 4);
+    img.compositeImage(dst, src); // 复制原图并添加Alpha通道
+
+    int w = src.width;
+    int h = src.height;
+    int r2 = (radius - 1) * (radius - 1);
+
+    // 四个角变透明
+    for (int y = 0; y < radius; y++) {
+      for (int x = 0; x < radius; x++) {
+        int dx = x - (radius - 1);
+        int dy = y - (radius - 1);
+        if (dx * dx + dy * dy > r2) {
+          dst.setPixelRgba(x, y, 0, 0, 0, 0); // 左上
+          dst.setPixelRgba(w - 1 - x, y, 0, 0, 0, 0); // 右上
+          dst.setPixelRgba(x, h - 1 - y, 0, 0, 0, 0); // 左下
+          dst.setPixelRgba(w - 1 - x, h - 1 - y, 0, 0, 0, 0); // 右下
+        }
+      }
+    }
+    return dst;
   }
 
   Future<void> _generateAndShare() async {
@@ -94,37 +116,39 @@ class _HomePageState extends State<HomePage> {
       final frontImg = img.decodeImage(frontBytes)!;
       final backImg = img.decodeImage(backBytes)!;
 
-      // 强制缩放为标准身份证尺寸 (300 DPI)
+      // 强制缩放为标准尺寸
       final resizedFront = img.copyResize(frontImg, width: 1011, height: 638);
       final resizedBack = img.copyResize(backImg, width: 1011, height: 638);
 
-      // 创建 A4 画布 2480 x 3508
+      // 添加圆角 (35px 约等于实际身份证 3mm 圆角)
+      final roundedFront = applyRoundedCorners(resizedFront, 35);
+      final roundedBack = applyRoundedCorners(resizedBack, 35);
+
+      // 创建 A4 画布
       final canvas = img.Image(width: 2480, height: 3508);
       img.fill(canvas, color: img.ColorRgb8(255, 255, 255));
 
       int gap = _gapPixels.toInt();
 
       if (_isVertical) {
-        // 竖向排列：水平居中，垂直根据间距居中计算
         int totalH = 638 * 2 + gap;
         int y1 = (3508 - totalH) ~/ 2;
         int y2 = y1 + 638 + gap;
         int x = (2480 - 1011) ~/ 2;
-        img.compositeImage(canvas, resizedFront, dstX: x, dstY: y1);
-        img.compositeImage(canvas, resizedBack, dstX: x, dstY: y2);
+        img.compositeImage(canvas, roundedFront, dstX: x, dstY: y1);
+        img.compositeImage(canvas, roundedBack, dstX: x, dstY: y2);
       } else {
-        // 横向排列：垂直居中，水平根据间距居中计算
         int totalW = 1011 * 2 + gap;
         int x1 = (2480 - totalW) ~/ 2;
         int x2 = x1 + 1011 + gap;
         int y = (3508 - 638) ~/ 2;
-        img.compositeImage(canvas, resizedFront, dstX: x1, dstY: y);
-        img.compositeImage(canvas, resizedBack, dstX: x2, dstY: y);
+        img.compositeImage(canvas, roundedFront, dstX: x1, dstY: y);
+        img.compositeImage(canvas, roundedBack, dstX: x2, dstY: y);
       }
 
       final pngBytes = img.encodePng(canvas);
       final tempDir = await getTemporaryDirectory();
-      final file = File('${tempDir.path}/id_card_a4_${DateTime.now().millisecondsSinceEpoch}.png');
+      final file = File('${tempDir.path}/身份证A4排版_${DateTime.now().millisecondsSinceEpoch}.png');
       await file.writeAsBytes(pngBytes);
 
       await Share.shareXFiles([XFile(file.path)], text: '身份证A4排版已生成，请打印');
@@ -178,7 +202,6 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // 将像素间距转换为毫米显示 (300 DPI: 1 inch = 25.4mm = 300px)
     double gapMm = _gapPixels / 300 * 25.4;
 
     return Scaffold(
@@ -227,7 +250,7 @@ class _HomePageState extends State<HomePage> {
                   Slider(
                     value: _gapPixels,
                     min: 0,
-                    max: 800, // 最大约 67mm 间距
+                    max: 800,
                     divisions: 80,
                     label: gapMm.toStringAsFixed(1),
                     onChanged: (value) => setState(() => _gapPixels = value),
@@ -244,7 +267,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    '说明：选图或拍照后会弹出裁剪框，请拖动边缘框选身份证有效区域以去除背景。生成图片为300DPI原件大小，打印时请选择“实际大小”。',
+                    '说明：选图或拍照后可自由拖动边框进行裁剪。生成图片时将自动为四个角添加圆弧效果，并缩放为身份证原件大小。打印时请选择“实际大小”。',
                     style: TextStyle(color: Colors.grey, fontSize: 12),
                     textAlign: TextAlign.center,
                   )
